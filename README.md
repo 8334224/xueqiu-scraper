@@ -33,6 +33,7 @@ playwright install chromium
 
 ```bash
 python3 main.py
+python3 main.py slowisquick
 ```
 
 ### 运行流程
@@ -45,10 +46,10 @@ python3 main.py
 
 ### 抓取指定用户
 
-修改 `main.py` 中的 `user_id` 变量：
+通过命令行参数传入目标用户 ID：
 
-```python
-user_id = "slowisquick"  # 改为目标用户ID
+```bash
+python3 main.py <user_id>
 ```
 
 ## 输出文件
@@ -97,7 +98,7 @@ python3 -m pytest tests/test_summarizer.py -v
 1. **公开内容限制** - 只能抓取用户公开发布的内容，需要登录的私密内容无法获取
 2. **反爬风险** - 频繁抓取可能触发雪球 WAF 或验证码
 3. **时间解析** - 依赖页面显示的时间格式（"5分钟前"、"昨天"等），解析可能不完整
-4. **单用户固定** - 当前版本 user_id 硬编码在 main.py 中
+4. **单次单用户** - 每次运行只处理一个 user_id，如需切换目标用户需重新执行命令并传入新的参数
 5. **无增量更新** - 每次运行全量抓取，不做本地缓存比对
 6. **规则总结** - 基于关键词规则的总结，非 AI 生成，准确度有限
 

@@ -3,7 +3,9 @@
 main.py - 雪球抓取入口
 优先使用浏览器探针，失败则回退到 HTTP 方式
 """
+import argparse
 import json
+from typing import Optional
 from fetcher import fetch_user_posts
 from browser_fetcher import fetch_posts_with_browser
 from utils import logger, save_to_json, get_artifacts_dir
@@ -11,9 +13,25 @@ from cleaner import clean_and_filter_posts
 from summarizer import generate_weekly_summary
 
 
-def main():
+DEFAULT_USER_ID = "slowisquick"
+
+
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description="抓取雪球用户公开帖子并生成本周汇总")
+    parser.add_argument(
+        "user_id",
+        nargs="?",
+        default=DEFAULT_USER_ID,
+        help=f"目标雪球用户ID，默认: {DEFAULT_USER_ID}",
+    )
+    return parser.parse_args()
+
+
+def main(user_id: Optional[str] = None):
     """主入口函数"""
-    user_id = "slowisquick"
+    if user_id is None:
+        user_id = parse_args().user_id
     
     print("\n" + "=" * 60)
     print("雪球用户帖子抓取工具")
