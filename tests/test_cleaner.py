@@ -5,7 +5,9 @@ test_cleaner.py - cleaner 模块测试
 """
 import pytest
 from datetime import datetime, timedelta
-from cleaner import parse_xueqiu_time
+from pathlib import Path
+from typing import get_type_hints
+from cleaner import clean_and_filter_posts, parse_xueqiu_time
 
 
 class TestParseXueqiuTime:
@@ -126,6 +128,22 @@ class TestParseEdgeCases:
         """测试带空格的时间字符串"""
         result = parse_xueqiu_time("  5分钟前  ")
         assert result is not None
+
+
+def test_clean_and_filter_posts_return_contract(tmp_path, monkeypatch):
+    raw_posts_path = tmp_path / "raw_posts.json"
+    raw_posts_path.write_text(
+        '[{"title": "recent", "time": "刚刚"}, {"title": "old", "time": "2024-01-01 00:00"}]',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("cleaner.get_artifacts_dir", lambda: tmp_path)
+
+    result = clean_and_filter_posts(raw_posts_path)
+
+    assert get_type_hints(clean_and_filter_posts)["return"] == tuple[Path, int, int, int, int]
+    assert result[0] == tmp_path / "clean_posts.json"
+    assert result[1:] == (2, 2, 1, 1)
+    assert result[0].exists()
 
 
 if __name__ == "__main__":

@@ -170,7 +170,7 @@ def filter_last_7_days(posts: list) -> tuple[list, list]:
     return filtered, excluded
 
 
-def clean_and_filter_posts(raw_posts_path: Optional[Path] = None) -> Path:
+def clean_and_filter_posts(raw_posts_path: Optional[Path] = None) -> tuple[Path, int, int, int, int]:
     """
     主入口：读取原始数据，清洗过滤，输出 clean_posts.json
     

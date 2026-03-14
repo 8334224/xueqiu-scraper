@@ -8,6 +8,12 @@ import re
 from pathlib import Path
 from utils import logger, get_artifacts_dir
 
+try:
+    from playwright.sync_api import Error as PlaywrightError
+except ImportError:
+    class PlaywrightError(Exception):
+        """Fallback when Playwright is unavailable at import time."""
+
 
 def fetch_posts_with_browser(user_id: str) -> tuple[list, bool]:
     """
@@ -232,7 +238,7 @@ def extract_post_data(element, index: int = 0) -> dict:
         data_id = element.get_attribute('data-id')
         if data_id:
             post['id'] = data_id
-    except:
+    except (AttributeError, TypeError, PlaywrightError):
         pass
     
     # 提取标题 - 增强选择器
@@ -250,7 +256,7 @@ def extract_post_data(element, index: int = 0) -> dict:
                     if href:
                         post['url'] = href if href.startswith('http') else f"https://xueqiu.com{href}"
                     break
-        except:
+        except (AttributeError, TypeError, PlaywrightError):
             continue
     
     # 提取内容
@@ -264,7 +270,7 @@ def extract_post_data(element, index: int = 0) -> dict:
                     content = content_text[:500]  # 限制长度
                     post['content'] = content
                     break
-        except:
+        except (AttributeError, TypeError, PlaywrightError):
             continue
     
     # 如果没有标题但有内容，用内容前50字作为标题
@@ -307,7 +313,7 @@ def extract_post_data(element, index: int = 0) -> dict:
                     post['datetime'] = datetime_attr
                     time_found = True
                     break
-        except:
+        except (AttributeError, TypeError, PlaywrightError):
             continue
     
     # 2. 如果还是没找到时间，尝试通过正则表达式从完整文本中提取
@@ -330,7 +336,7 @@ def extract_post_data(element, index: int = 0) -> dict:
                     post['time'] = match.group(0)
                     time_found = True
                     break
-        except:
+        except (AttributeError, TypeError, PlaywrightError):
             pass
     
     # 3. 调试输出（仅前3条）
@@ -342,7 +348,7 @@ def extract_post_data(element, index: int = 0) -> dict:
             try:
                 debug_text = element.inner_text()[:100] if hasattr(element, 'inner_text') else 'N/A'
                 logger.info(f"  第{index+1}条帖子未提取到时间，内容片段: {debug_text[:100]}...")
-            except:
+            except (AttributeError, TypeError, PlaywrightError):
                 logger.info(f"  第{index+1}条帖子未提取到时间")
     
     # 统一时间字段名
@@ -377,7 +383,7 @@ def extract_from_page_js(page) -> list:
                     logger.info(f"找到页面变量: {var_name}")
                     # 这里可以进一步解析数据结构
                     break
-            except:
+            except PlaywrightError:
                 continue
     except Exception as e:
         logger.warning(f"读取页面 JS 变量失败: {e}")
