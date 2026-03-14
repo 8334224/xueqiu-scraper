@@ -4,10 +4,13 @@ test_summarizer.py - summarizer 模块测试
 测试去重和低价值过滤功能
 """
 import pytest
+import summary_config as config
 from summarizer import (
     is_low_value_post,
     calculate_content_hash,
-    deduplicate_posts
+    deduplicate_posts,
+    classify_topic,
+    calculate_info_density,
 )
 
 
@@ -192,6 +195,25 @@ class TestDeduplicatePosts:
         ]
         result = deduplicate_posts(posts)
         assert len(result) == 0
+
+
+class TestConfigDrivenRules:
+    """测试配置驱动的总结规则"""
+
+    def test_classify_topic_reads_from_config(self, monkeypatch):
+        monkeypatch.setattr(config, "TOPIC_KEYWORDS", {"自定义主题": ["护城河"]})
+        monkeypatch.setattr(config, "MAX_TOPICS_PER_POST", 1)
+
+        post = {"title": "公司护城河分析", "content": "这家公司有很深的护城河"}
+
+        assert classify_topic(post) == ["自定义主题"]
+
+    def test_calculate_info_density_reads_high_value_patterns(self, monkeypatch):
+        monkeypatch.setattr(config, "HIGH_VALUE_PATTERNS", [(r"特别信号", 5)])
+
+        post = {"title": "测试", "content": "特别信号"}
+
+        assert calculate_info_density(post) >= 20
 
 
 if __name__ == "__main__":

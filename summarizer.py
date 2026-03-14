@@ -9,37 +9,28 @@ from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Any, Set, Tuple
+import summary_config as config
 from utils import logger, get_artifacts_dir
 
 
-# 主题关键词定义 - 精简版，避免过度标签化
-TOPIC_KEYWORDS = {
-    "茅台渠道/政策": ["茅台", "飞天", "贵州茅台", "600519", "i茅台", "经销商", "生肖酒", "陈年茅台", "渠道", "代售"],
-    "段永平/投资逻辑": ["大道无形我有型", "段永平", "gphone", "差异化", "生意", "商业模式", "长期", "价值"],
-    "市场/行情": ["市场", "股市", "大盘", "指数", "涨跌", "牛市", "熊市", "震荡"],
-    "持仓/操作": ["持仓", "仓位", "买入", "卖出", "加仓", "减仓", "清仓", "建仓"],
-    "企业/财报": ["财报", "业绩", "营收", "利润", "ROE", "毛利率", "护城河", "竞争力"],
-}
+def load_posts_for_summary() -> List[Dict[str, Any]]:
+    """优先加载价值判断后的帖子，尽量让规则摘要聚焦高/中价值内容"""
+    artifacts_dir = get_artifacts_dir()
+    valued_posts_path = artifacts_dir / "valued_posts.json"
+    clean_posts_path = artifacts_dir / "clean_posts.json"
 
-# 低价值内容过滤模式
-LOW_VALUE_PATTERNS = [
-    r"^回复@",                    # 回复开头
-    r"回复\s*[@＠]",              # 包含回复@
-    r"^//@",                     # 转发回复
-    r"我们确实活下来了",           # 单纯确认类
-    r"^[嗯|哦|好|是|对|谢谢]+[！|。]?$",  # 单个语气词
-    r"^(赞同|同意|支持|顶)[！|。]?$",      # 简短附和
-]
+    if valued_posts_path.exists():
+        with open(valued_posts_path, "r", encoding="utf-8") as f:
+            valued_posts = json.load(f)
+        prioritized_posts = [post for post in valued_posts if post.get("value_level") in {"high", "medium"}]
+        if prioritized_posts:
+            logger.info("规则摘要优先使用 valued_posts.json: %s 条高/中价值内容", len(prioritized_posts))
+            return prioritized_posts
+        logger.info("valued_posts.json 中无高/中价值内容，回退为全量 clean_posts")
+        return valued_posts
 
-# 高价值内容特征
-HIGH_VALUE_PATTERNS = [
-    (r"\$[^$]+\([A-Z]+\d+\)\$", 3),   # 股票代码 权重3
-    (r"\d+%", 1),                       # 百分比数据
-    (r"\d+亿", 2),                      # 金额数据 权重2
-    (r"政策|新政|要点", 2),              # 政策类
-    (r"其一|其二|其三|第一|第二|第三", 1), # 结构化论述
-    (r"差异化|商业模式|护城河", 2),       # 投资深度词
-]
+    with open(clean_posts_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
 
 
 def is_low_value_post(post: Dict[str, Any]) -> bool:
@@ -49,7 +40,7 @@ def is_low_value_post(post: Dict[str, Any]) -> bool:
     text = title + " " + content
     
     # 检查是否匹配低价值模式
-    for pattern in LOW_VALUE_PATTERNS:
+    for pattern in config.LOW_VALUE_PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
             # 如果内容很短（<100字），直接判定为低价值
             if len(content) < 100:
@@ -109,7 +100,7 @@ def classify_topic(post: Dict[str, Any]) -> List[str]:
     matched_topics = []
     match_scores = []
     
-    for topic, keywords in TOPIC_KEYWORDS.items():
+    for topic, keywords in config.TOPIC_KEYWORDS.items():
         score = sum(2 if kw in text else 0 for kw in keywords[:2])  # 核心关键词权重2
         score += sum(1 for kw in keywords[2:] if kw in text)        # 其他关键词权重1
         if score > 0:
@@ -117,7 +108,7 @@ def classify_topic(post: Dict[str, Any]) -> List[str]:
     
     # 按匹配分数排序，取前2个最相关的主题
     match_scores.sort(key=lambda x: x[1], reverse=True)
-    matched_topics = [topic for topic, _ in match_scores[:2]]
+    matched_topics = [topic for topic, _ in match_scores[:config.MAX_TOPICS_PER_POST]]
     
     # 如果没有匹配到任何主题，归为"其他"
     if not matched_topics:
@@ -148,7 +139,7 @@ def calculate_info_density(post: Dict[str, Any]) -> int:
         score += 35  # 稍长但可接受
     
     # 高价值模式加分
-    for pattern, weight in HIGH_VALUE_PATTERNS:
+    for pattern, weight in config.HIGH_VALUE_PATTERNS:
         matches = re.findall(pattern, text)
         score += len(matches) * weight * 3
     
@@ -211,7 +202,7 @@ def extract_core_conclusion(posts: List[Dict[str, Any]]) -> str:
     return f"本周主要讨论主题：{main_topic}"
 
 
-def generate_highlights(posts: List[Dict[str, Any]], max_count: int = 4) -> List[Dict[str, Any]]:
+def generate_highlights(posts: List[Dict[str, Any]], max_count: int = config.MAX_HIGHLIGHTS) -> List[Dict[str, Any]]:
     """
     生成重点观点列表 - 严格控制数量和质量
     只保留最值得看的 2~4 条
@@ -294,7 +285,7 @@ def extract_links(posts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 urls.append(u)
         
         if urls:
-            for u in urls[:1]:  # 每帖最多取1个链接
+            for u in urls[:config.MAX_LINKS_PER_POST]:
                 seen_urls.add(u)
                 link_posts.append({
                     "title": post.get("title", "无标题")[:40],
@@ -303,7 +294,7 @@ def extract_links(posts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 })
     
     # 最多保留6条链接
-    return link_posts[:6]
+    return link_posts[:config.MAX_LINKS]
 
 
 def summarize_by_rules(posts: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -344,7 +335,7 @@ def summarize_by_rules(posts: List[Dict[str, Any]]) -> Dict[str, Any]:
     core_conclusion = extract_core_conclusion(unique_posts)
     
     # 4. 生成重点观点（严格限制2-4条）
-    highlights = generate_highlights(unique_posts, max_count=4)
+    highlights = generate_highlights(unique_posts, max_count=config.MAX_HIGHLIGHTS)
     
     # 5. 提取链接
     links = extract_links(unique_posts)
@@ -359,7 +350,7 @@ def summarize_by_rules(posts: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "title": p.get("title", "无标题")[:50],
                     "published_at": p.get("published_at", "")
                 }
-                for p in topic_post_list[:2]  # 每个主题最多2条示例
+                for p in topic_post_list[:config.MAX_TOPIC_EXAMPLES]
             ]
         }
     
@@ -420,7 +411,7 @@ def generate_markdown_summary(summary: Dict[str, Any]) -> str:
         
         # 只显示数量，不展开所有帖子
         sorted_topics = sorted(summary['topics'].items(), key=lambda x: x[1]['count'], reverse=True)
-        for topic_name, topic_data in sorted_topics[:4]:  # 最多显示4个主题
+        for topic_name, topic_data in sorted_topics[:config.MAX_MARKDOWN_TOPICS]:
             lines.append(f"- **{topic_name}**：{topic_data['count']} 条讨论")
         lines.append("")
     
@@ -455,8 +446,7 @@ def generate_weekly_summary():
         logger.error(f"clean_posts.json 不存在: {clean_posts_path}")
         raise FileNotFoundError(f"请先运行数据抓取和清洗: {clean_posts_path}")
     
-    with open(clean_posts_path, 'r', encoding='utf-8') as f:
-        posts = json.load(f)
+    posts = load_posts_for_summary()
     
     if not posts:
         logger.warning("clean_posts.json 为空，无内容可总结")

@@ -4,6 +4,7 @@ cleaner.py - 帖子数据清洗与过滤模块
 """
 import json
 import re
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -119,11 +120,15 @@ def clean_post(raw_post: dict, collected_at: str) -> dict:
     
     # 解析时间
     published_at = None
+    time_parse_status = "missing_time"
     if time_raw:
         parsed = parse_xueqiu_time(time_raw)
         if parsed:
             published_at = parsed.isoformat()
-    
+            time_parse_status = "parsed"
+        else:
+            time_parse_status = "time_parse_failed"
+
     # 构建清洗后的数据结构
     clean_post = {
         "title": title,
@@ -131,46 +136,115 @@ def clean_post(raw_post: dict, collected_at: str) -> dict:
         "url": url,
         "published_at_raw": time_raw,
         "published_at": published_at,
-        "collected_at": collected_at
+        "collected_at": collected_at,
+        "_time_parse_status": time_parse_status,
     }
     
     return clean_post
 
 
-def filter_last_7_days(posts: list) -> tuple[list, list]:
+def _normalize_text(value) -> str:
+    """统一处理文本字段"""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _get_exclusion_reasons(post: dict, seven_days_ago: datetime) -> list[str]:
+    """判断帖子被排除的原因"""
+    reasons = []
+
+    if not isinstance(post, dict):
+        return ["invalid_post"]
+
+    title = _normalize_text(post.get("title"))
+    content = _normalize_text(post.get("content"))
+    if not title and not content:
+        reasons.append("empty_content")
+
+    time_parse_status = post.get("_time_parse_status")
+    published_at_str = post.get("published_at")
+    published_at_raw = _normalize_text(post.get("published_at_raw"))
+
+    if not published_at_str:
+        if time_parse_status == "time_parse_failed":
+            reasons.append("time_parse_failed")
+        elif not published_at_raw:
+            reasons.append("missing_time")
+        else:
+            reasons.append("missing_time")
+    else:
+        try:
+            published_at = datetime.fromisoformat(published_at_str)
+            if published_at < seven_days_ago:
+                reasons.append("older_than_window")
+        except (ValueError, TypeError):
+            reasons.append("time_parse_failed")
+
+    if not reasons:
+        return []
+
+    return list(dict.fromkeys(reasons))
+
+
+def _build_excluded_post_record(post: dict, reasons: list[str]) -> dict:
+    """构建排除帖子记录"""
+    record = {
+        "title": post.get("title", ""),
+        "content": post.get("content", ""),
+        "url": post.get("url", ""),
+        "published_at_raw": post.get("published_at_raw"),
+        "published_at": post.get("published_at"),
+        "collected_at": post.get("collected_at"),
+        "reasons": reasons,
+    }
+    return record
+
+
+def _write_json_file(path: Path, data):
+    """写入 JSON 文件"""
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _build_cleaning_summary(raw_count: int, clean_count: int, excluded_posts: list[dict]) -> dict:
+    """构建清洗汇总统计"""
+    reason_counter = Counter()
+    for post in excluded_posts:
+        reason_counter.update(post.get("reasons", []))
+
+    return {
+        "raw_count": raw_count,
+        "clean_count": clean_count,
+        "excluded_count": len(excluded_posts),
+        "excluded_by_reason": dict(sorted(reason_counter.items())),
+    }
+
+
+def filter_last_7_days(posts: list, days: int = 7) -> tuple[list, list]:
     """
-    过滤出最近7天的帖子
+    过滤出最近 N 天的帖子
     
     Returns:
         tuple: (符合条件的帖子列表, 被排除的帖子列表)
     """
     now = datetime.now()
-    seven_days_ago = now - timedelta(days=7)
+    window_start = now - timedelta(days=days)
     
     filtered = []
     excluded = []
     
     for post in posts:
-        published_at_str = post.get('published_at')
-        
-        if published_at_str:
-            try:
-                published_at = datetime.fromisoformat(published_at_str)
-                if published_at >= seven_days_ago:
-                    filtered.append(post)
-                else:
-                    excluded.append(post)
-            except (ValueError, TypeError):
-                # 时间解析失败，排除
-                excluded.append(post)
+        reasons = _get_exclusion_reasons(post, window_start)
+        if reasons:
+            excluded.append(_build_excluded_post_record(post, reasons))
         else:
-            # 没有时间信息，排除
-            excluded.append(post)
+            filtered.append(post)
     
     return filtered, excluded
 
 
-def clean_and_filter_posts(raw_posts_path: Optional[Path] = None) -> tuple[Path, int, int, int, int]:
+def clean_and_filter_posts(raw_posts_path: Optional[Path] = None, days: int = 7) -> tuple[Path, int, int, int, int]:
     """
     主入口：读取原始数据，清洗过滤，输出 clean_posts.json
     
@@ -201,14 +275,22 @@ def clean_and_filter_posts(raw_posts_path: Optional[Path] = None) -> tuple[Path,
             parse_success_count += 1
         clean_posts.append(cleaned)
     
-    # 过滤最近7天
-    filtered_posts, excluded_posts = filter_last_7_days(clean_posts)
+    # 过滤最近 N 天
+    filtered_posts, excluded_posts = filter_last_7_days(clean_posts, days=days)
     
+    artifacts_dir = get_artifacts_dir()
+
     # 保存清洗后的数据
-    output_path = get_artifacts_dir() / "clean_posts.json"
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(filtered_posts, f, ensure_ascii=False, indent=2)
-    
+    output_path = artifacts_dir / "clean_posts.json"
+    _write_json_file(output_path, filtered_posts)
+
+    excluded_output_path = artifacts_dir / "excluded_posts.json"
+    _write_json_file(excluded_output_path, excluded_posts)
+
+    cleaning_summary = _build_cleaning_summary(len(raw_posts), len(filtered_posts), excluded_posts)
+    cleaning_summary_path = artifacts_dir / "cleaning_summary.json"
+    _write_json_file(cleaning_summary_path, cleaning_summary)
+
     # 打印统计信息
     print("\n" + "=" * 60)
     print("📊 数据清洗与过滤统计")
@@ -216,12 +298,25 @@ def clean_and_filter_posts(raw_posts_path: Optional[Path] = None) -> tuple[Path,
     print(f"原始帖子总数: {len(raw_posts)}")
     print(f"成功解析时间: {parse_success_count}")
     print(f"时间解析失败: {len(raw_posts) - parse_success_count}")
-    print(f"最近7天帖子: {len(filtered_posts)}")
+    print(f"最近{days}天帖子: {len(filtered_posts)}")
     print(f"被排除帖子: {len(excluded_posts)}")
+    if cleaning_summary["excluded_by_reason"]:
+        print("排除原因统计:")
+        for reason, count in cleaning_summary["excluded_by_reason"].items():
+            print(f"  - {reason}: {count}")
     print(f"输出文件: {output_path}")
+    print(f"排除明细: {excluded_output_path}")
+    print(f"统计汇总: {cleaning_summary_path}")
     print("=" * 60)
     
-    logger.info(f"清洗完成: 原始{len(raw_posts)}条, 解析成功{parse_success_count}条, 7天内{len(filtered_posts)}条")
+    logger.info(
+        "清洗完成: 原始%s条, 解析成功%s条, %s天内%s条, 排除%s条",
+        len(raw_posts),
+        parse_success_count,
+        days,
+        len(filtered_posts),
+        len(excluded_posts),
+    )
     
     return output_path, len(raw_posts), parse_success_count, len(filtered_posts), len(excluded_posts)
 

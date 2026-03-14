@@ -3,6 +3,7 @@
 test_cleaner.py - cleaner 模块测试
 测试时间解析功能
 """
+import json
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -144,6 +145,65 @@ def test_clean_and_filter_posts_return_contract(tmp_path, monkeypatch):
     assert result[0] == tmp_path / "clean_posts.json"
     assert result[1:] == (2, 2, 1, 1)
     assert result[0].exists()
+
+
+def test_clean_and_filter_posts_writes_excluded_and_summary(tmp_path, monkeypatch):
+    raw_posts_path = tmp_path / "raw_posts.json"
+    raw_posts_path.write_text(
+        json.dumps(
+            [
+                {"title": "recent", "content": "keep", "time": "刚刚"},
+                {"title": "old", "content": "too old", "time": "2024-01-01 00:00"},
+                {"title": "missing time", "content": "no time"},
+                {"title": "", "content": "", "time": "刚刚"},
+                {"title": "bad time", "content": "bad", "time": "not-a-time"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("cleaner.get_artifacts_dir", lambda: tmp_path)
+
+    clean_and_filter_posts(raw_posts_path)
+
+    excluded_posts = json.loads((tmp_path / "excluded_posts.json").read_text(encoding="utf-8"))
+    cleaning_summary = json.loads((tmp_path / "cleaning_summary.json").read_text(encoding="utf-8"))
+    clean_posts = json.loads((tmp_path / "clean_posts.json").read_text(encoding="utf-8"))
+
+    assert len(clean_posts) == 1
+    assert len(excluded_posts) == 4
+    assert {reason for post in excluded_posts for reason in post["reasons"]} >= {
+        "older_than_window",
+        "missing_time",
+        "empty_content",
+        "time_parse_failed",
+    }
+    assert cleaning_summary == {
+        "raw_count": 5,
+        "clean_count": 1,
+        "excluded_count": 4,
+        "excluded_by_reason": {
+            "empty_content": 1,
+            "missing_time": 1,
+            "older_than_window": 1,
+            "time_parse_failed": 1,
+        },
+    }
+
+
+def test_clean_and_filter_posts_supports_custom_days(tmp_path, monkeypatch):
+    raw_posts_path = tmp_path / "raw_posts.json"
+    raw_posts_path.write_text(
+        '[{"title": "within 14 days", "content": "ok", "time": "168小时前"}, {"title": "too old", "content": "old", "time": "360小时前"}]',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("cleaner.get_artifacts_dir", lambda: tmp_path)
+
+    result = clean_and_filter_posts(raw_posts_path, days=14)
+    clean_posts = json.loads((tmp_path / "clean_posts.json").read_text(encoding="utf-8"))
+
+    assert result[3:] == (1, 1)
+    assert len(clean_posts) == 1
 
 
 if __name__ == "__main__":

@@ -2,10 +2,9 @@
 """
 utils.py - 辅助工具函数
 """
-import os
-import sys
 from pathlib import Path
 import logging
+from typing import Optional, Union
 
 # 配置日志
 logging.basicConfig(
@@ -14,6 +13,7 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+_artifacts_dir_override = None
 
 
 def get_project_root() -> Path:
@@ -21,9 +21,15 @@ def get_project_root() -> Path:
     return Path(__file__).parent.absolute()
 
 
+def set_artifacts_dir(path: Optional[Union[Path, str]]):
+    """设置 artifacts 目录覆盖路径"""
+    global _artifacts_dir_override
+    _artifacts_dir_override = Path(path).expanduser().resolve() if path else None
+
+
 def get_artifacts_dir() -> Path:
     """获取 artifacts 目录路径"""
-    artifacts_dir = get_project_root() / "artifacts"
+    artifacts_dir = _artifacts_dir_override or (get_project_root() / "artifacts")
     artifacts_dir.mkdir(exist_ok=True)
     return artifacts_dir
 
