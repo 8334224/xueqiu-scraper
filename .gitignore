@@ -1,0 +1,29 @@
+artifacts/
+.pytest_cache/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Python build and packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Python environment and tooling caches
+.venv/
+venv/
+env/
+ENV/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
